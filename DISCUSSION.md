@@ -30,6 +30,17 @@ After running `docker compose up -d`, the PostgreSQL container started and the `
 
 This is the ground zero state. The database exists as a named container, but it doesn't know anything about advocates or migrations or application structure yet. Everything that makes this database useful for the application still needs to be built.
 
+### Query One: The Empty Table
+
+```sql
+SELECT COUNT(*) FROM advocates;
+-- Result: 0
+```
+
+This query returns zero instead of an error, which means the `advocates` table now exists. Between Query Zero and this query, two things happened:
+
+First, `npx drizzle-kit generate` read the TypeScript schema and created migration file `0000_elite_thor.sql`. Then `npm run drizzle:migrate:up` applied those migrations, creating the `advocates` table and a `drizzle` schema for tracking which migrations have run.
+
 #### Schema Inspection
 
 ```sql
@@ -44,34 +55,19 @@ solaceassignment=# \dn
 
 This query lists two schemas: `public` (where the advocates table lives) and `drizzle` (which tracks migrations). The presence of the `drizzle` schema confirms that migrations were applied through the proper workflow rather than manual table creation.
 
-### Query One: The Empty Table
-
-```sql
-SELECT COUNT(*) FROM advocates;
--- Result: 0
-```
-
-This query returns zero instead of an error, which means the `advocates` table now exists. Between Query Zero and this query, two things happened:
-
-First, `npx drizzle-kit generate` read the TypeScript schema and created migration file `0000_elite_thor.sql`. Then `npm run drizzle:migrate:up` applied those migrations, creating the `advocates` table and a `drizzle` schema for tracking which migrations have run.
-
 The database now has structure but no data.
 
-### The Gap: When Plans Don't Survive Contact
+#### Problem One
 
-When I tried running `npm run seed`, Node threw an error about not being able to find a module. Specifically, it was looking for `src/db/seed/index.ts`, which doesn't exist in the project. The package.json script is configured to run this file using esbuild-register to transpile TypeScript on the fly, but you can't transpile a file that isn't there.
+When I tried running `npm run seed`, Node threw an error about not being able to find a module. Specifically, it was looking for `src/db/seed/index.ts`, which doesn't exist in the project. The `package.json` script is configured to run this file using esbuild-register to transpile TypeScript on the fly, but you can't transpile a file that isn't there.
 
-This is one of those interesting artifacts you find in software projects. The script definition suggests someone planned to implement a direct database seeding approach where a standalone Node script would connect to PostgreSQL and insert records independently of the Next.js application. It's a reasonable pattern. Direct seeding scripts don't require the whole application to be running, they execute faster, and they're easier to integrate into CI/CD pipelines.
+The file structure in `src/db/seed/` contains only `advocates.ts`, which exports the seed data itself but doesn't include any logic to actually insert it into the database. The `package.json` script is trying to run an `index.ts` that would have contained that insertion logic, but it's not there.
 
-But somewhere along the line, the project pivoted to a different approach. Maybe the direct script seemed like overkill for a small dataset. Maybe the API-based approach was simpler to implement. Maybe someone just forgot to finish it. Whatever the reason, the script definition stayed in package.json even though the actual implementation never materialized.
+The reference to the script in `package.json` suggests someone planned to implement a direct database seeding approach where a standalone Node script would connect to PostgreSQL and insert records independently of the Next.js application. It's a reasonable pattern. Direct seeding scripts don't require the whole application to be running, they execute faster, and they're easier to integrate into CI/CD pipelines.
 
-The file structure in `src/db/seed/` contains only `advocates.ts`, which exports the seed data itself but doesn't include any logic to actually insert it into the database. The package.json script is trying to run an `index.ts` that would have contained that insertion logic, but it's not there.
+But somewhere along the line, the project pivoted to a different approach and for whatever the reason, the script definition stayed in `package.json` even though the actual implementation never materialized.
 
-This is actually a fairly common situation in full-stack development: multiple ways to accomplish the same task, each with different tradeoffs. Direct database scripts don't require the application to be running and they bypass application-layer logic, which can be good for speed but bad for consistency. API endpoints integrate with the application's middleware and validation logic, which is good for maintainability but requires the server to be running.
-
-The incomplete implementation suggests the project started with one approach and switched to another without cleaning up the old script definition. It happens. Code evolves.
-
-### The Working Alternative
+#### The Working Alternative
 
 Since the direct seeding script didn't work, I used the API endpoint at `/api/seed`. After starting the dev server with `npm run dev`, I ran `curl -X POST http://localhost:3000/api/seed` to trigger the seeding.
 
@@ -91,7 +87,7 @@ SELECT COUNT(*) FROM advocates;
 -- Result: 30
 ```
 
-I made a second request to `http://localhost:3000/api/seed`, and the count doubled to 30. **The seeding endpoint has no duplicate protection, so running it multiple times creates duplicate records**. This _might be_ fine for development, but may also confuse testing and verification of certain feature's (i.e., search and user selection of a specific advocate). We would need additional safeguards for production in order to constrain the data to storing unique records (not just unique identifiers).
+I made a second request to `http://localhost:3000/api/seed`, and the count doubled to 30. **The seeding endpoint has no duplication protection, so running it multiple times creates duplicate records**. This _might be_ fine for development, but may also confuse testing and verification of certain feature's (i.e., search and user selection of a specific advocate). We would need additional safeguards for production in order to constrain the data to storing unique records (not just unique identifiers).
 
 ### Summary
 
